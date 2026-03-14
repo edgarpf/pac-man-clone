@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arcade Pac-Man</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+        body {
+            background-color: #080808;
+            background-image: radial-gradient(circle, #1a1a2e 0%, #000000 100%);
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Press Start 2P', monospace;
+            margin: 0;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        h1 {
+            color: #fffc00;
+            text-shadow: 0 0 10px #fffc00, 0 0 20px #ffaa00;
+            font-size: 24px;
+            margin-bottom: 20px;
+            letter-spacing: 2px;
+            text-align: center;
+        }
+
+        #arcade-cabinet {
+            position: relative;
+            padding: 20px;
+            background: #000;
+            border: 4px solid #ff0055;
+            border-radius: 15px;
+            box-shadow: 0 0 15px #ff0055, inset 0 0 20px rgba(255, 0, 85, 0.5);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        #arcade-cabinet::before {
+            content: " ";
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.3) 50%);
+            background-size: 100% 4px;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        .info-panel {
+            display: flex;
+            justify-content: space-between;
+            width: 100%;
+            margin-bottom: 15px;
+            font-size: 12px;
+        }
+
+        #score {
+            color: #00ffff;
+            text-shadow: 0 0 5px #00ffff;
+        }
+
+        canvas {
+            background-color: black;
+            border: 2px solid #2424ff;
+            box-shadow: 0 0 10px #2424ff;
+            display: block;
+        }
+
+        #instructions {
+            margin-top: 25px;
+            font-size: 9px;
+            color: #39ff14;
+            text-align: center;
+            line-height: 2;
+            text-shadow: 0 0 5px #39ff14;
+        }
+
+        #insert-coin {
+            animation: blinker 1s linear infinite;
+            color: #fffc00;
+            margin-top: 15px;
+            font-size: 12px;
+            text-shadow: 0 0 8px #fffc00;
+            visibility: visible;
+        }
+
+        @keyframes blinker {
+            50% {
+                opacity: 0;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>PAC-MAN CLONE</h1>
+
+    <div id="arcade-cabinet">
+        <div class="info-panel">
+            <div id="score-board">1UP <span id="score">0000</span></div>
+            <div style="color: #ff0055;">LEVEL <span id="level">1</span></div>
+        </div>
+        <canvas id="gameCanvas" width="420" height="420"></canvas>
+    </div>
+
+    <div id="insert-coin">INSERT COIN (PRESS SPACE)</div>
+
+    <div id="instructions">
+        > HOLD ARROW KEYS TO MOVE <br>
+        > AVOID THE GHOSTS <br>
+        > PRESS SPACE TO START
+    </div>
+
+    <script>
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        const audioCtx = new AudioContext();
+        let wakaPitchToggle = true;
+
+        function playTone(freq, type, duration, vol = 0.05) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+
+            oscillator.type = type;
+            oscillator.frequency.setValueAtTime(freq, audioCtx.currentTime);
+
+            gainNode.gain.setValueAtTime(vol, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            oscillator.start();
+            oscillator.stop(audioCtx.currentTime + duration);
+        }
+
+        function playDeathSound() {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(50, audioCtx.currentTime + 1);
+
+            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 1);
+
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 1);
+        }
+
+        function playWinSound() {
+            setTimeout(() => playTone(440, 'square', 0.15, 0.05), 0);
+            setTimeout(() => playTone(554, 'square', 0.15, 0.05), 150);
+            setTimeout(() => playTone(659, 'square', 0.15, 0.05), 300);
+            setTimeout(() => playTone(880, 'square', 0.4, 0.05), 450);
+        }
+
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const scoreElement = document.getElementById("score");
+        const levelElement = document.getElementById("level");
+        const insertCoinMsg = document.getElementById("insert-coin");
+
+        const tileSize = 20;
+        let score = 0;
+        let level = 1;
+        let gameStarted = false;
+        let gameOver = false;
+        let totalDots = 0;
+        let soundPlayed = false;
+
+        // 1 = Wall, 0 = Dot, 2 = Empty space
+        const layout = [
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+            [1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1],
+            [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+            [1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1],
+            [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1],
+            [1, 1, 1, 1, 1, 0, 1, 1, 1, 2, 1, 2, 1, 1, 1, 0, 1, 1, 1, 1, 1],
+            [2, 2, 2, 2, 1, 0, 1, 2, 2, 2, 2, 2, 2, 2, 1, 0, 1, 2, 2, 2, 2],
+            [1, 1, 1, 1, 1, 0, 1, 2, 1, 1, 2, 1, 1, 2, 1, 0, 1, 1, 1, 1, 1],
+            [2, 2, 2, 2, 2, 0, 2, 2, 1, 2, 2, 2, 1, 2, 2, 0, 2, 2, 2, 2, 2],
+            [1, 1, 1, 1, 1, 0, 1, 2, 1, 1, 1, 1, 1, 2, 1, 0, 1, 1, 1, 1, 1],
+            [2, 2, 2, 2, 1, 0, 1, 2, 2, 2, 2, 2, 2, 2, 1, 0, 1, 2, 2, 2, 2],
+            [1, 1, 1, 1, 1, 0, 1, 2, 1, 1, 1, 1, 1, 2, 1, 0, 1, 1, 1, 1, 1],
+            [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+            [1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1],
+            [1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1],
+            [1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1],
+            [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1],
+            [1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1],
+            [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+        ];
+
+        let map = [];
+        const keys = { ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false };
+
+        function updateScoreBoard() {
+            scoreElement.innerText = score.toString().padStart(4, '0');
+            levelElement.innerText = level;
+        }
+
+        const pacman = {
+            x: 10, y: 15, vx: 0, vy: 0, speed: 0.1, angle: 0,
+            mouthAngle: 0.2, mouthDir: -1,
+
+            draw: function () {
+                ctx.save();
+                ctx.translate(this.x * tileSize + tileSize / 2, this.y * tileSize + tileSize / 2);
+                ctx.rotate(this.angle);
+
+                ctx.beginPath();
+                ctx.arc(0, 0, tileSize / 2 - 2, this.mouthAngle * Math.PI, (2 - this.mouthAngle) * Math.PI);
+                ctx.lineTo(0, 0);
+                ctx.fillStyle = "#fffc00";
+                ctx.fill();
+                ctx.closePath();
+
+                ctx.restore();
+            },
+            update: function () {
+                if (Number.isInteger(this.x) && Number.isInteger(this.y)) {
+                    let intendedVx = 0; let intendedVy = 0;
+
+                    if (keys.ArrowUp) { intendedVy = -1; }
+                    else if (keys.ArrowDown) { intendedVy = 1; }
+                    else if (keys.ArrowLeft) { intendedVx = -1; }
+                    else if (keys.ArrowRight) { intendedVx = 1; }
+
+                    if (intendedVx !== 0 || intendedVy !== 0) {
+                        if (map[this.y + intendedVy] && map[this.y + intendedVy][this.x + intendedVx] !== 1) {
+                            this.vx = intendedVx; this.vy = intendedVy;
+                        } else {
+                            this.vx = 0; this.vy = 0;
+                        }
+                    } else {
+                        this.vx = 0; this.vy = 0;
+                    }
+                }
+
+                this.x = Math.round((this.x + this.vx * this.speed) * 100) / 100;
+                this.y = Math.round((this.y + this.vy * this.speed) * 100) / 100;
+
+                if (this.vx !== 0 || this.vy !== 0) {
+                    this.mouthAngle += 0.03 * this.mouthDir;
+                    if (this.mouthAngle <= 0) {
+                        this.mouthAngle = 0; this.mouthDir = 1;
+                    } else if (this.mouthAngle >= 0.2) {
+                        this.mouthAngle = 0.2; this.mouthDir = -1;
+                    }
+                }
+
+                if (this.vx === 1) this.angle = 0;
+                else if (this.vx === -1) this.angle = Math.PI;
+                else if (this.vy === 1) this.angle = Math.PI / 2;
+                else if (this.vy === -1) this.angle = -Math.PI / 2;
+
+                if (Number.isInteger(this.x) && Number.isInteger(this.y)) {
+                    if (map[this.y][this.x] === 0) {
+                        map[this.y][this.x] = 2;
+                        score += 10;
+                        totalDots--;
+                        updateScoreBoard();
+
+                        playTone(wakaPitchToggle ? 440 : 587, 'triangle', 0.1);
+                        wakaPitchToggle = !wakaPitchToggle;
+
+                        if (totalDots === 0) {
+                            level++;
+                            playWinSound();
+                            setupLevel();
+                        }
+                    }
+                }
+
+                if (this.x < 0) this.x = map[0].length - 1;
+                if (this.x > map[0].length - 1) this.x = 0;
+            }
+        };
+
+        class Ghost {
+            constructor(x, y, color) {
+                this.x = x; this.y = y; this.vx = 0; this.vy = 0; this.speed = 0.05;
+                this.color = color;
+            }
+            draw() {
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x * tileSize + tileSize / 2, this.y * tileSize + tileSize / 2, tileSize / 2 - 2, Math.PI, 0);
+                ctx.lineTo(this.x * tileSize + tileSize - 2, this.y * tileSize + tileSize - 2);
+                ctx.lineTo(this.x * tileSize + 2, this.y * tileSize + tileSize - 2);
+                ctx.fill();
+
+                ctx.fillStyle = "white";
+                ctx.beginPath();
+                ctx.arc(this.x * tileSize + 6, this.y * tileSize + 8, 3, 0, Math.PI * 2);
+                ctx.arc(this.x * tileSize + 14, this.y * tileSize + 8, 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            update() {
+                if (Number.isInteger(this.x) && Number.isInteger(this.y)) {
+                    let possibleMoves = [];
+                    const directions = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+
+                    for (let dir of directions) {
+                        if (this.vx === -dir[0] && this.vy === -dir[1] && (this.vx !== 0 || this.vy !== 0)) continue;
+
+                        if (map[this.y + dir[1]] && map[this.y + dir[1]][this.x + dir[0]] !== 1) {
+                            possibleMoves.push(dir);
+                        }
+                    }
+
+                    if (possibleMoves.length === 0) {
+                        this.vx *= -1; this.vy *= -1;
+                    } else {
+                        const move = possibleMoves[Math.floor(Math.random() * possibleMoves.length)];
+                        this.vx = move[0]; this.vy = move[1];
+                    }
+                }
+
+                this.x = Math.round((this.x + this.vx * this.speed) * 100) / 100;
+                this.y = Math.round((this.y + this.vy * this.speed) * 100) / 100;
+
+                if (this.x < 0) this.x = map[0].length - 1;
+                if (this.x > map[0].length - 1) this.x = 0;
+
+                const dist = Math.hypot(this.x - pacman.x, this.y - pacman.y);
+                if (dist < 0.8) gameOver = true;
+            }
+        }
+
+        let ghosts = [];
+
+        // Array of classic colors for the ghosts to pick from
+        const ghostColors = ["#ff0000", "#ffb8ff", "#00ffff", "#ffb852", "#00ff00", "#ff00ff", "#ffffff"];
+
+        function setupLevel() {
+            map = layout.map(row => [...row]);
+            totalDots = 0;
+            let validSpawns = []; // Array to store all valid spawn locations
+
+            for (let y = 0; y < map.length; y++) {
+                for (let x = 0; x < map[y].length; x++) {
+                    if (map[y][x] === 0) totalDots++;
+
+                    // Add to valid spawns if it's not a wall
+                    if (map[y][x] !== 1) {
+                        // Safety check: Keep a distance of at least 5 blocks from Pac-Man's start (10, 15)
+                        if (Math.hypot(x - 10, y - 15) > 5) {
+                            validSpawns.push({ x: x, y: y });
+                        }
+                    }
+                }
+            }
+
+            pacman.x = 10; pacman.y = 15; pacman.vx = 0; pacman.vy = 0; pacman.angle = 0;
+            pacman.mouthAngle = 0.2;
+
+            ghosts = [];
+            // Base ghosts (2) + current level (e.g. Level 1 = 3 ghosts, Level 2 = 4 ghosts)
+            let numberOfGhosts = 2 + level;
+
+            for (let i = 0; i < numberOfGhosts; i++) {
+                // Pick a random index from the valid spawn array
+                let randomIndex = Math.floor(Math.random() * validSpawns.length);
+                let spawnPos = validSpawns[randomIndex];
+
+                // Cycle through the colors array based on the current index
+                let color = ghostColors[i % ghostColors.length];
+
+                ghosts.push(new Ghost(spawnPos.x, spawnPos.y, color));
+
+                // Remove that spot from the array so another ghost doesn't spawn directly on top
+                validSpawns.splice(randomIndex, 1);
+            }
+
+            gameStarted = false;
+            insertCoinMsg.style.visibility = "visible";
+
+            if (level === 1 && score === 0) {
+                insertCoinMsg.innerText = "INSERT COIN (PRESS SPACE)";
+            } else {
+                insertCoinMsg.innerText = "PRESS SPACE FOR LEVEL " + level;
+            }
+        }
+
+        function initGame() {
+            score = 0;
+            level = 1;
+            gameOver = false;
+            soundPlayed = false;
+
+            setupLevel();
+            updateScoreBoard();
+        }
+
+        document.addEventListener("keydown", (e) => {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            if (e.key === " " && e.target === document.body) e.preventDefault();
+            if (keys.hasOwnProperty(e.key)) keys[e.key] = true;
+
+            if (e.key === " ") {
+                if (!gameStarted && !gameOver) {
+                    gameStarted = true;
+                    insertCoinMsg.style.visibility = "hidden";
+                }
+                else if (gameOver) {
+                    initGame();
+                    gameLoop();
+                }
+            }
+        });
+
+        document.addEventListener("keyup", (e) => {
+            if (keys.hasOwnProperty(e.key)) keys[e.key] = false;
+        });
+
+        function drawMap() {
+            for (let y = 0; y < map.length; y++) {
+                for (let x = 0; x < map[y].length; x++) {
+                    if (map[y][x] === 1) {
+                        ctx.fillStyle = "#2424ff";
+                        ctx.fillRect(x * tileSize, y * tileSize, tileSize, tileSize);
+                        ctx.fillStyle = "black";
+                        ctx.fillRect(x * tileSize + 2, y * tileSize + 2, tileSize - 4, tileSize - 4);
+                    } else if (map[y][x] === 0) {
+                        ctx.fillStyle = "#ffdbac";
+                        ctx.beginPath();
+                        ctx.arc(x * tileSize + tileSize / 2, y * tileSize + tileSize / 2, 2.5, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+            }
+        }
+
+        function gameLoop() {
+            if (!gameStarted && !gameOver) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                drawMap();
+                pacman.draw();
+                ghosts.forEach(g => g.draw());
+
+                ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.font = '16px "Press Start 2P", monospace';
+                ctx.fillStyle = "#fffc00";
+                ctx.textAlign = "center";
+                ctx.fillText("READY!", canvas.width / 2, canvas.height / 2 + 5);
+
+                requestAnimationFrame(gameLoop);
+                return;
+            }
+
+            if (gameOver) {
+                insertCoinMsg.style.visibility = "visible";
+                insertCoinMsg.innerText = "PRESS SPACE TO RESTART";
+
+                if (!soundPlayed) {
+                    playDeathSound();
+                    soundPlayed = true;
+                }
+
+                ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                ctx.font = '22px "Press Start 2P", monospace';
+                ctx.textAlign = "center";
+                ctx.fillStyle = "#ff0055";
+                ctx.fillText("GAME OVER", canvas.width / 2, canvas.height / 2 - 10);
+
+                return;
+            }
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawMap();
+            pacman.update();
+
+            if (gameStarted) {
+                pacman.draw();
+                ghosts.forEach(ghost => {
+                    ghost.update();
+                    ghost.draw();
+                });
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        document.fonts.ready.then(() => {
+            initGame();
+            gameLoop();
+        });
+
+    </script>
+
+</body>
+
+</html>
