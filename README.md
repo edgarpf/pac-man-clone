@@ -6,7 +6,7 @@ A fully playable, retro-style Pac-Man clone built entirely in a **single HTML fi
 
 ## ✨ Features
 
-* **Zero Dependencies:** The entire game logic, styling, and audio generation live inside one `pacman.html` file.
+* **Zero Dependencies:** The entire game logic, styling, and audio generation live inside one `index.html` file.
 * **Infinite Levels & Dynamic Difficulty:** The game progresses infinitely. Every time you clear a stage, the level increases, and an additional ghost spawns to ramp up the difficulty.
 * **Procedural Spawning:** Ghosts are spawned dynamically in random, valid map locations—safely away from Pac-Man's starting point.
 * **Web Audio API Synthesizer:** Classic arcade sounds (the "waka-waka" movement, level clear jingle, and death sound) are generated entirely via code using browser oscillators.
