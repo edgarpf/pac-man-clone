@@ -26,7 +26,7 @@ A fully playable, retro-style Pac-Man clone built entirely in a **single HTML fi
 Because this project is completely self-contained, there is no installation or build process required to run it on your machine.
 
 1. Clone or download this repository.
-2. Double-click the `pacman.html` file to open it in any modern web browser (Chrome, Firefox, Edge, Safari).
+2. Double-click the `index.html` file to open it in any modern web browser (Chrome, Firefox, Edge, Safari).
 3. Press `SPACEBAR` or tap the screen and enjoy!
 
 ## 🛠️ Technologies Used
